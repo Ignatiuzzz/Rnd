@@ -1,15 +1,11 @@
-/* ==========================================================================
-   MODERN DARK UI — clean & coherent
-   ========================================================================== */
 
-/* -------- Variables -------- */
 :root {
   --bg: #0b0c10;
   --panel: #101218;
   --muted: #9aa0a6;
   --fg: #e8eaed;
-  --accent: #ff8a00;   /* naranja modern */
-  --accent-2: #4cc9f0; /* azul complementario */
+  --accent: #ff8a00;
+  --accent-2: #4cc9f0;
   --border: #20242f;
 
   --radius-sm: 10px;
@@ -18,6 +14,11 @@
 
   --shadow-soft: 0 10px 30px rgba(0,0,0,.35);
   --shadow-inset: inset 0 0 0 1px rgba(255,255,255,.02);
+
+  --scroll-thumb: rgba(76, 201, 240, .35);
+  --scroll-thumb-hover: rgba(76, 201, 240, .55);
+  --scroll-thumb-active: rgba(76, 201, 240, .75);
+  --scroll-track: transparent;
 }
 
 /* -------- Base / Reset -------- */
@@ -40,9 +41,7 @@ h3 { margin: 6px 0 4px; font-size: 16px; }
 
 .muted { color: var(--muted); }
 
-/* ==========================================================================
-   LAYOUT
-   ========================================================================== */
+/* ========================================================================== */
 .container {
   max-width: 1100px;
   margin: 40px auto;
@@ -71,9 +70,8 @@ h3 { margin: 6px 0 4px; font-size: 16px; }
 /* Main panel */
 .content { min-width: 0; }
 
-/* ==========================================================================
-   CARDS (selector de simulación)
-   ========================================================================== */
+/* ========================================================================== */
+/* CARDS (selector de simulación) */
 .cards {
   display: grid;
   grid-template-columns: 1fr;
@@ -105,9 +103,8 @@ h3 { margin: 6px 0 4px; font-size: 16px; }
 .card h3 { color: var(--fg); }
 .card p { color: var(--muted); margin: 4px 0 0; font-size: 13px; line-height: 1.35; }
 
-/* ==========================================================================
-   RUNNER (panel de ejecución)
-   ========================================================================== */
+/* ========================================================================== */
+/* RUNNER (panel de ejecución) */
 .runner {
   border: 1px solid var(--border);
   background: var(--panel);
@@ -116,9 +113,8 @@ h3 { margin: 6px 0 4px; font-size: 16px; }
   box-shadow: var(--shadow-inset), var(--shadow-soft);
 }
 
-/* ==========================================================================
-   FORM
-   ========================================================================== */
+/* ========================================================================== */
+/* FORM */
 .form {
   display: grid;
   grid-template-columns: 1fr 220px;
@@ -130,9 +126,7 @@ h3 { margin: 6px 0 4px; font-size: 16px; }
   .form { grid-template-columns: 1fr; }
 }
 
-.row {
-  display: contents; /* permite que label y input ocupen columnas del grid */
-}
+.row { display: contents; } /* permite que label y input ocupen columnas del grid */
 
 .row > span {
   align-self: center;
@@ -181,38 +175,8 @@ input:focus-visible {
 .btn:focus-visible { outline: 2px solid rgba(76,201,240,.45); outline-offset: 2px; }
 .btn:disabled { opacity: .6; cursor: not-allowed; transform: none; }
 
-/* ==========================================================================
-   CONSOLE (salida de eventos)
-   ========================================================================== */
-.console {
-  background: #0a0d14;
-  border: 1px solid #222838;
-  border-radius: var(--radius-md);
-  padding: 12px;
-  min-height: 180px;
-  max-height: 420px;
-  overflow: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 13px;
-  line-height: 1.35;
-  box-shadow: var(--shadow-inset);
-}
-
-/* mejor legibilidad por líneas */
-.console > div { padding: 2px 0; }
-
-/* Scrollbar dark */
-.console {
-  scrollbar-width: thin;
-  scrollbar-color: #2c3546 transparent;
-}
-.console::-webkit-scrollbar { width: 10px; height: 10px; }
-.console::-webkit-scrollbar-thumb { background: #2c3546; border-radius: 10px; }
-.console::-webkit-scrollbar-track { background: transparent; }
-
-/* ==========================================================================
-   UTILS
-   ========================================================================== */
+/* ========================================================================== */
+/* UTILS */
 .section {
   border: 1px solid var(--border);
   background: linear-gradient(180deg, #121624, #0f121a 60%, #0d1017);
@@ -220,7 +184,6 @@ input:focus-visible {
   padding: 14px;
   box-shadow: var(--shadow-inset), var(--shadow-soft);
 }
-
 .section + .section { margin-top: 14px; }
 
 /* Badges */
@@ -236,7 +199,7 @@ input:focus-visible {
   border: 1px solid #2b3242;
 }
 
-/* Tables compactas (si las usas) */
+/* Tables compactas */
 .table-wrap {
   overflow: auto;
   border: 1px solid var(--border);
@@ -271,10 +234,39 @@ input:focus-visible {
 .table tbody tr:nth-child(even) { background: #0f1320; }
 .table tbody tr:hover { background: #141a2b; }
 
-/* ==========================================================================
-   ACCESSIBILITY
-   ========================================================================== */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+}
+
+/* WebKit (Chromium / Safari / Edge) */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: var(--scroll-track);
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;   /* hace que “flote” */
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
+*::-webkit-scrollbar-thumb:active { background: var(--scroll-thumb-active); }
+*::-webkit-scrollbar-track { background: var(--scroll-track); }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* Ajuste fino en zonas con scroll frecuente */
+.console::-webkit-scrollbar,
+.table-wrap::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+/* ========================================================================== */
+/* ACCESSIBILITY */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
-

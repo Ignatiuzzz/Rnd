@@ -1,97 +1,245 @@
 import { useMemo, useRef, useState } from "react";
 import type { RunnerSpec, SimEvent } from "./events";
 
+type TableColumn = { key: string; label: string; align?: "left" | "right" | "center" };
+type TableSpec = { title?: string; columns: TableColumn[]; rows: Record<string, any>[] };
+
+type ParamRow = { label: string; value: string | number };
+type SummarySpec = { title?: string; rows: ParamRow[] };
+
 type Props = { spec: RunnerSpec };
 
 export default function Runner({ spec }: Props) {
-    const [log, setLog] = useState<string[]>([]);
-    const formRef = useRef<HTMLFormElement>(null);
-    const [running, setRunning] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [running, setRunning] = useState(false);
 
-    const defaults = useMemo(() => {
-        const d: Record<string, any> = {};
-        spec.inputs.forEach((f) => {
-            if (f.defaultValue !== undefined) d[f.key] = f.defaultValue;
-        });
-        return d;
-    }, [spec]);
+  // NUEVO: estado estructurado
+  const [paramsView, setParamsView] = useState<ParamRow[]>([]);
+  const [table, setTable] = useState<TableSpec | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [summary, setSummary] = useState<SummarySpec | null>(null);
 
-    function append(e: SimEvent) {
-        if (e.type === "stdout") setLog((L) => [...L, e.line]);
-        else if (e.type === "stderr") setLog((L) => [...L, `[WARN] ${e.line}`]);
-        else if (e.type === "info") setLog((L) => [...L, `> ${e.message}`]);
-        else if (e.type === "step") setLog((L) => [...L, `• ${e.name}: ${JSON.stringify(e.data ?? {})}`]);
-        else if (e.type === "done") setLog((L) => [...L, `✓ FIN: ${JSON.stringify(e.summary ?? {})}`]);
+  const defaults = useMemo(() => {
+    const d: Record<string, any> = {};
+    spec.inputs.forEach((f) => {
+      if (f.defaultValue !== undefined) d[f.key] = f.defaultValue;
+    });
+    return d;
+  }, [spec]);
+
+  function resetViews() {
+    setParamsView([]);
+    setTable(null);
+    setWarnings([]);
+    setSummary(null);
+  }
+
+  // Adaptador de eventos
+  function append(e: SimEvent) {
+    if (e.type === "stderr") {
+      setWarnings((W) => [...W, e.line]);
+      return;
     }
-
-    // --- NUEVO: helper para convertir FormData -> params tipados
-    function buildParams(): Record<string, any> {
-        const fd = new FormData(formRef.current!);
-        const raw = Object.fromEntries(fd.entries()); // Record<string, FormDataEntryValue>
-        const params: Record<string, any> = {};
-
-        spec.inputs.forEach((f) => {
-            const rawVal = raw[f.key]; // string | File
-            const str = typeof rawVal === "string" ? rawVal : "";
-
-            if (f.type === "int" || f.type === "float") {
-                // manejar vacío y NaN
-                const v = Number(str);
-                const fallback = f.defaultValue ?? 0;
-                params[f.key] = Number.isFinite(v) ? v : fallback;
-            } else {
-                // string
-                const fallback = (f.defaultValue ?? "") as string | number;
-                params[f.key] = str.length ? str : String(fallback);
-            }
-        });
-
-        return params;
+    if (e.type === "info" && (e as any).panel === "params") {
+      // e.g., emit({type:'info', panel:'params', data:[{label,value}, ...]})
+      const data = (e as any).data as ParamRow[] | undefined;
+      if (data?.length) setParamsView(data);
+      return;
     }
-
-    async function onRun(ev: React.FormEvent) {
-        ev.preventDefault();
-        if (running) return;
-        setLog([]);
-        setRunning(true);
-
-        const params = buildParams();
-
-        try {
-            await spec.run(params, append);
-        } catch (err: any) {
-            append({ type: "stderr", line: String(err?.message ?? err) });
-        } finally {
-            setRunning(false);
-        }
+    if (e.type === "step" && e.name === "table:init") {
+      const spec = e.data as { title?: string; columns: TableColumn[] };
+      setTable({ title: spec.title, columns: spec.columns, rows: [] });
+      return;
     }
+    if (e.type === "step" && e.name === "table:row") {
+      const row = e.data as Record<string, any>;
+      setTable((T) => (T ? { ...T, rows: [...T.rows, row] } : T));
+      return;
+    }
+    if (e.type === "done") {
+      // preferimos summary amigable si viene como {title, rows:[{label,value}]}
+      const s = (e as any).summaryFriendly as SummarySpec | undefined;
+      if (s?.rows?.length) setSummary(s);
+      else if (e.summary) {
+        // fallback: convertir claves → pares
+        const rows: ParamRow[] = Object.entries(e.summary).map(([k, v]) => ({
+          label: toFriendly(k),
+          value: typeof v === "number" ? v : String(v),
+        }));
+        setSummary({ title: "Resumen", rows });
+      }
+      return;
+    }
+  }
 
-    return (
-        <div className="runner">
-            <h2>{spec.title}</h2>
-            <form ref={formRef} onSubmit={onRun} className="form">
-                {spec.inputs.map((f) => (
-                    <label key={f.key} className="row">
-                        <span>{f.label}</span>
-                        <input
-                            name={f.key}
-                            defaultValue={defaults[f.key] ?? ""}
-                            type={f.type === "string" ? "text" : "number"}
-                            step={f.type === "int" ? 1 : "any"}
-                        />
-                    </label>
-                ))}
+  // Mapeo simple para fallback
+  function toFriendly(k: string) {
+    const map: Record<string, string> = {
+      totalJuegos: "Total de juegos",
+      ganadosCasa: "Juegos ganados por la casa",
+      perdidosCasa: "Juegos perdidos por la casa",
+      porcentajeGanadosCasa: "Porcentaje de juegos ganados",
+      gananciaNetaTotalBs: "Ganancia neta total (Bs)",
+      horas: "Horas simuladas",
+      clientesAtendidos: "Clientes atendidos",
+      articulosVendidos: "Artículos vendidos",
+      ingresoTotalBs: "Ingreso total (Bs)",
+      costoVariableBs: "Costo variable (Bs)",
+      costoFijoBs: "Costo fijo (Bs)",
+      gananciaNetaBs: "Ganancia neta (Bs)",
+    };
+    return map[k] ?? k;
+  }
 
-                <button className="btn" disabled={running}>
-                    {running ? "Ejecutando..." : "Ejecutar"}
-                </button>
-            </form>
+  // Construye params desde el Form
+  function buildParams(): Record<string, any> {
+    const fd = new FormData(formRef.current!);
+    const raw = Object.fromEntries(fd.entries());
+    const params: Record<string, any> = {};
+    spec.inputs.forEach((f) => {
+      const val = raw[f.key];
+      const str = typeof val === "string" ? val : "";
+      if (f.type === "int" || f.type === "float") {
+        const n = Number(str);
+        params[f.key] = Number.isFinite(n) ? n : f.defaultValue ?? 0;
+      } else {
+        params[f.key] = str.length ? str : String(f.defaultValue ?? "");
+      }
+    });
+    return params;
+  }
 
-            <pre className="console">
-                {log.map((l, i) => (
-                    <div key={i}>{l}</div>
-                ))}
-            </pre>
+  async function onRun(ev: React.FormEvent) {
+    ev.preventDefault();
+    if (running) return;
+    resetViews();
+    setRunning(true);
+    try {
+      const params = buildParams();
+      await spec.run(params, append);
+    } catch (err: any) {
+      setWarnings((W) => [...W, String(err?.message ?? err)]);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="runner">
+      <h2>{spec.title}</h2>
+
+      {/* FORM */}
+      <form ref={formRef} onSubmit={onRun} className="form">
+        {spec.inputs.map((f) => (
+          <label key={f.key} className="row">
+            <span>{f.label}</span>
+            <input
+              name={f.key}
+              defaultValue={defaults[f.key] ?? ""}
+              type={f.type === "string" ? "text" : "number"}
+              step={f.type === "int" ? 1 : "any"}
+            />
+          </label>
+        ))}
+        <div style={{ gridColumn: "1 / -1" }}>
+          <button className="btn" disabled={running}>
+            {running ? "Ejecutando..." : "Ejecutar"}
+          </button>
         </div>
-    );
+      </form>
+
+      {/* WARNINGS */}
+      {warnings.length > 0 && (
+        <div className="error" role="alert">
+          {warnings.map((w, i) => (
+            <div key={i}>{w}</div>
+          ))}
+        </div>
+      )}
+
+      {/* PARÁMETROS */}
+      {paramsView.length > 0 && (
+        <div className="section" aria-label="Parámetros utilizados">
+          <h3 style={{ marginTop: 0 }}>Parámetros</h3>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Campo</th>
+                  <th>Valor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paramsView.map((r, i) => (
+                  <tr key={i}>
+                    <td>{r.label}</td>
+                    <td>{String(r.value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TABLA DE RESULTADOS */}
+      {table && (
+        <div className="section" aria-label="Resultados">
+          {table.title && <h3 style={{ marginTop: 0 }}>{table.title}</h3>}
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  {table.columns.map((c) => (
+                    <th key={c.key} style={{ textAlign: c.align ?? "left" }}>
+                      {c.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {table.rows.map((r, i) => (
+                  <tr key={i}>
+                    {table.columns.map((c) => (
+                      <td key={c.key} style={{ textAlign: c.align ?? "left" }}>
+                        {formatCell(r[c.key])}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* RESUMEN */}
+      {summary && (
+        <div className="section" aria-label="Resumen">
+          <h3 style={{ marginTop: 0 }}>{summary.title ?? "Resumen"}</h3>
+          <div className="table-wrap">
+            <table className="table">
+              <tbody>
+                {summary.rows.map((r, i) => (
+                  <tr key={i}>
+                    <td style={{ width: 320, fontWeight: 700 }}>{r.label}</td>
+                    <td>{String(r.value)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function formatCell(v: any) {
+  if (typeof v === "number") {
+    // formateo estándar para números
+    const isInt = Number.isInteger(v);
+    return isInt ? v.toLocaleString() : v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  return String(v ?? "");
 }

@@ -1,4 +1,3 @@
-// client/src/sims/p3.ts
 import type { RunnerSpec } from "../events";
 
 /**
@@ -21,46 +20,58 @@ function makeLCG(seedNum: number) {
   let x = (seedNum >>> 0) || 123456789;
   const a = 1664525, c = 1013904223, m = 2 ** 32;
   return {
-    next() {
-      x = (Math.imul(a, x) + c) >>> 0;
-      return x / m;
-    },
-    randint1to6() {
-      return 1 + Math.floor(this.next() * 6);
-    },
+    next() { x = (Math.imul(a, x) + c) >>> 0; return x / m; },
+    randint1to6() { return 1 + Math.floor(this.next() * 6); },
   };
 }
 
 export const simP3: RunnerSpec = {
   id: "p3",
   title: "P3 - Juego de dados (la casa pierde si sale 7)",
-  description:
-    "Simula N juegos: suma 7 → casa −3 Bs; suma ≠ 7 → casa +2 Bs.",
+  description: "Simula N juegos: suma 7 → casa −3 Bs; suma ≠ 7 → casa +2 Bs.",
   inputs: [
-    { key: "N", label: "N (número de juegos)", type: "int", defaultValue: 10 },
+    { key: "N", label: "Número de juegos", type: "int", defaultValue: 10 },
     { key: "seed", label: "Semilla RNG (opcional)", type: "string", defaultValue: "" },
   ],
   async run(params, emit) {
     const Nraw = Number(params.N);
     const N = Number.isFinite(Nraw) && Nraw > 0 ? Math.floor(Nraw) : 10;
     const seedStr = String(params.seed ?? "").trim();
-
     const rng = seedStr ? makeLCG(strToSeed(seedStr)) : makeLCG((Math.random() * 1e9) >>> 0);
 
+    // 1) Parámetros legibles
+    emit({
+      type: "info",
+      panel: "params",
+      data: [
+        { label: "Número de juegos", value: N },
+        { label: "Semilla RNG", value: seedStr === "" ? "Aleatoria" : `"${seedStr}" (determinista)` },
+        { label: "Regla de pago", value: "Suma = 7 → −3 Bs; Suma ≠ 7 → +2 Bs" },
+      ],
+    } as any);
+
+    // 2) Tabla: especificación
+    emit({
+      type: "step",
+      name: "table:init",
+      data: {
+        title: "Resultados por juego",
+        columns: [
+          { key: "juego", label: "Juego", align: "right" },
+          { key: "d1", label: "Dado 1", align: "right" },
+          { key: "d2", label: "Dado 2", align: "right" },
+          { key: "suma", label: "Suma", align: "right" },
+          { key: "resultado", label: "Resultado" },
+          { key: "gananciaAcum", label: "Ganancia acumulada (Bs)", align: "right" },
+        ],
+      },
+    });
+
+    // 3) Simulación
     let juegos = 0;
     let ganaCasa = 0;
     let pierdeCasa = 0;
     let gananciaAcum = 0;
-
-    // Parámetros
-    emit({ type: "stdout", line: `Parámetros:` });
-    emit({ type: "stdout", line: `  • N (número de juegos): ${N}` });
-    emit({ type: "stdout", line: `  • Semilla RNG: ${seedStr === "" ? "aleatoria" : `"${seedStr}" (determinista)"`}` });
-    emit({ type: "stdout", line: "" });
-
-    // Encabezado claro
-    emit({ type: "stdout", line: "N° Juego | Dado 1  Dado 2 | Suma | Resultado     | Ganancia Acumulada (Bs)" });
-    emit({ type: "stdout", line: "--------------------------------------------------------------------------" });
 
     while (juegos < N) {
       const d1 = rng.randint1to6();
@@ -80,27 +91,23 @@ export const simP3: RunnerSpec = {
 
       juegos++;
 
-      const linea =
-        `${String(juegos).padStart(8)} |` +
-        `   ${String(d1).padStart(2)}      ${String(d2).padStart(2)} |` +
-        `  ${String(suma).padStart(3)} | ` +
-        `${resultado.padEnd(13)} | ` +
-        `${gananciaAcum.toFixed(2).padStart(23)}`;
-      emit({ type: "stdout", line: linea });
+      emit({
+        type: "step",
+        name: "table:row",
+        data: {
+          juego: juegos,
+          d1,
+          d2,
+          suma,
+          resultado,
+          gananciaAcum: Number(gananciaAcum.toFixed(2)),
+        },
+      });
     }
-
-    emit({ type: "stdout", line: "--------------------------------------------------------------------------" });
 
     const porcentajeGana = N > 0 ? (100 * ganaCasa) / N : 0;
 
-    // Resumen con nombres entendibles
-    emit({ type: "stdout", line: "Resumen:" });
-    emit({ type: "stdout", line: `  • Total de juegos: ${N}` });
-    emit({ type: "stdout", line: `  • Juegos ganados por la casa (suma ≠ 7): ${ganaCasa}` });
-    emit({ type: "stdout", line: `  • Juegos perdidos por la casa (suma = 7): ${pierdeCasa}` });
-    emit({ type: "stdout", line: `  • Porcentaje de juegos ganados por la casa: ${porcentajeGana.toFixed(2)}%` });
-    emit({ type: "stdout", line: `  • Ganancia neta total de la casa: ${gananciaAcum.toFixed(2)} Bs` });
-
+    // 4) Resumen amigable
     emit({
       type: "done",
       summary: {
@@ -110,6 +117,16 @@ export const simP3: RunnerSpec = {
         porcentajeGanadosCasa: Number(porcentajeGana.toFixed(2)),
         gananciaNetaTotalBs: Number(gananciaAcum.toFixed(2)),
       },
-    });
+      summaryFriendly: {
+        title: "Resumen",
+        rows: [
+          { label: "Total de juegos", value: N },
+          { label: "Juegos ganados por la casa (suma ≠ 7)", value: ganaCasa },
+          { label: "Juegos perdidos por la casa (suma = 7)", value: pierdeCasa },
+          { label: "Porcentaje de juegos ganados", value: `${porcentajeGana.toFixed(2)} %` },
+          { label: "Ganancia neta total", value: `${gananciaAcum.toFixed(2)} Bs` },
+        ],
+      },
+    } as any);
   },
 };
