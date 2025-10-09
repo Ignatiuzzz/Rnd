@@ -34,10 +34,39 @@ export const simP3: RunnerSpec = {
     { key: "seed", label: "Semilla RNG (opcional)", type: "string", defaultValue: "" },
   ],
   async run(params, emit) {
+    // ===== VALIDACIÓN =====
+    const ERR: string[] = [];
+    const NMax = 100000; // Evita bloqueos por tamaños gigantes
+
+    // N: entero, >0, finito y razonable
     const Nraw = Number(params.N);
-    const N = Number.isFinite(Nraw) && Nraw > 0 ? Math.floor(Nraw) : 10;
+    if (!Number.isFinite(Nraw)) {
+      ERR.push("«Número de juegos» debe ser un número válido (sin letras).");
+    } else if (!Number.isInteger(Nraw)) {
+      ERR.push("«Número de juegos» debe ser un entero (sin decimales).");
+    } else if (Nraw <= 0) {
+      ERR.push("«Número de juegos» debe ser mayor que 0.");
+    } else if (Nraw > NMax) {
+      ERR.push(`«Número de juegos» no puede ser mayor que ${NMax}.`);
+    }
+
+    // Semilla: opcional, pero si viene pedimos un tamaño razonable
     const seedStr = String(params.seed ?? "").trim();
-    const rng = seedStr ? makeLCG(strToSeed(seedStr)) : makeLCG((Math.random() * 1e9) >>> 0);
+    if (seedStr.length > 120) {
+      ERR.push("La semilla es demasiado larga (máximo 120 caracteres).");
+    }
+
+    // Si hay errores, los mostramos y cancelamos
+    if (ERR.length) {
+      ERR.forEach((msg) => emit({ type: "stderr", line: msg }));
+      emit({ type: "stderr", line: "Corrige los campos y vuelve a intentar." });
+      return;
+    }
+
+    const N = Math.floor(Nraw);
+    const rng = seedStr
+      ? makeLCG(strToSeed(seedStr))
+      : makeLCG((Math.random() * 1e9) >>> 0);
 
     // 1) Parámetros legibles
     emit({
@@ -78,15 +107,13 @@ export const simP3: RunnerSpec = {
       const d2 = rng.randint1to6();
       const suma = d1 + d2;
 
-      let resultado: "Casa gana" | "Casa pierde";
-      if (suma === 7) {
+      const casaPierde = suma === 7;
+      if (casaPierde) {
         gananciaAcum += -3;
         pierdeCasa++;
-        resultado = "Casa pierde";
       } else {
         gananciaAcum += 2;
         ganaCasa++;
-        resultado = "Casa gana";
       }
 
       juegos++;
@@ -99,7 +126,7 @@ export const simP3: RunnerSpec = {
           d1,
           d2,
           suma,
-          resultado,
+          resultado: casaPierde ? "Casa pierde" : "Casa gana",
           gananciaAcum: Number(gananciaAcum.toFixed(2)),
         },
       });

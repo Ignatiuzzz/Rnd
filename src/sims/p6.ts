@@ -47,14 +47,103 @@ export const simP6: RunnerSpec = {
         { key: "seed", label: "Semilla RNG (opcional)", type: "string", defaultValue: "" },
     ],
     async run(params, emit) {
-        const NMD = Number.isFinite(+params.NMD) && +params.NMD > 0 ? Math.floor(+params.NMD) : 27;
-        const CBO = Number.isFinite(+params.CBO) && +params.CBO > 0 ? +params.CBO : 700;
-        const PUV = Number.isFinite(+params.PUV) && +params.PUV >= 0 ? +params.PUV : 5.0;
-        const CADQ = Number.isFinite(+params.CADQ) && +params.CADQ >= 0 ? +params.CADQ : 3.5;
-        const CINV = Number.isFinite(+params.CINV) && +params.CINV >= 0 ? +params.CINV : 0.1;
-        const CORDET_UNIT = Number.isFinite(+params.CORDET_UNIT) && +params.CORDET_UNIT >= 0 ? +params.CORDET_UNIT : 100;
-        const media_demanda = Number.isFinite(+params.media_demanda) && +params.media_demanda > 0 ? +params.media_demanda : 100;
+        // ===== VALIDACIÓN =====
+        const ERR: string[] = [];
+        const WARN: string[] = [];
+
+        // Límites razonables para evitar bloqueos
+        const NMD_MAX = 5000;         // máx. de días
+        const CBO_MAX = 10_000_000;   // máx. capacidad (kg)
+        const PRICE_MAX = 1_000_000;  // máx. precios/costos
+        const DEM_MAX = 1_000_000;    // máx. media de demanda (kg/día)
+        const EXPECTED_TOTAL_MAX = 50_000_000; // tope de demanda esperada NMD * media_demanda
+
+        // Parseos
+        const nmdRaw = Number(params.NMD);
+        const cboRaw = Number(params.CBO);
+        const puvRaw = Number(params.PUV);
+        const cadqRaw = Number(params.CADQ);
+        const cinvRaw = Number(params.CINV);
+        const cordRaw = Number(params.CORDET_UNIT);
+        const mediaRaw = Number(params.media_demanda);
         const seedStr = String(params.seed ?? "").trim();
+
+        // NMD: entero > 0 y <= NMD_MAX
+        if (!Number.isFinite(nmdRaw)) ERR.push("«Días a simular» debe ser un número válido (sin letras).");
+        else if (!Number.isInteger(nmdRaw)) ERR.push("«Días a simular» debe ser un entero (sin decimales).");
+        else if (nmdRaw <= 0) ERR.push("«Días a simular» debe ser mayor que 0.");
+        else if (nmdRaw > NMD_MAX) ERR.push(`«Días a simular» no puede ser mayor que ${NMD_MAX}.`);
+
+        // CBO: > 0 y razonable
+        if (!Number.isFinite(cboRaw)) ERR.push("«Capacidad de bodega (kg)» debe ser un número válido.");
+        else if (cboRaw <= 0) ERR.push("«Capacidad de bodega (kg)» debe ser mayor que 0.");
+        else if (cboRaw > CBO_MAX) ERR.push(`«Capacidad de bodega (kg)» no puede ser mayor que ${CBO_MAX.toLocaleString()} kg.`);
+
+        // PUV, CADQ, CINV, CORDET_UNIT: >= 0 y razonables
+        if (!Number.isFinite(puvRaw)) ERR.push("«Precio de venta (Bs/kg)» debe ser un número válido.");
+        else if (puvRaw < 0) ERR.push("«Precio de venta (Bs/kg)» no puede ser negativo.");
+        else if (puvRaw > PRICE_MAX) ERR.push(`«Precio de venta (Bs/kg)» es demasiado alto (>${PRICE_MAX}).`);
+
+        if (!Number.isFinite(cadqRaw)) ERR.push("«Costo de adquisición (Bs/kg)» debe ser un número válido.");
+        else if (cadqRaw < 0) ERR.push("«Costo de adquisición (Bs/kg)» no puede ser negativo.");
+        else if (cadqRaw > PRICE_MAX) ERR.push(`«Costo de adquisición (Bs/kg)» es demasiado alto (>${PRICE_MAX}).`);
+
+        if (!Number.isFinite(cinvRaw)) ERR.push("«Costo de inventario (Bs/kg·día)» debe ser un número válido.");
+        else if (cinvRaw < 0) ERR.push("«Costo de inventario (Bs/kg·día)» no puede ser negativo.");
+        else if (cinvRaw > PRICE_MAX) ERR.push(`«Costo de inventario (Bs/kg·día)» es demasiado alto (>${PRICE_MAX}).`);
+
+        if (!Number.isFinite(cordRaw)) ERR.push("«Costo por orden (Bs)» debe ser un número válido.");
+        else if (cordRaw < 0) ERR.push("«Costo por orden (Bs)» no puede ser negativo.");
+        else if (cordRaw > PRICE_MAX) ERR.push(`«Costo por orden (Bs)» es demasiado alto (>${PRICE_MAX}).`);
+
+        // media_demanda: > 0 y razonable
+        if (!Number.isFinite(mediaRaw)) ERR.push("«Demanda media (kg/día)» debe ser un número válido.");
+        else if (mediaRaw <= 0) ERR.push("«Demanda media (kg/día)» debe ser mayor que 0.");
+        else if (mediaRaw > DEM_MAX) ERR.push(`«Demanda media (kg/día)» no puede ser mayor que ${DEM_MAX.toLocaleString()} kg/día.`);
+
+        // Semilla: longitud máxima
+        if (seedStr.length > 120) ERR.push("La semilla es demasiado larga (máximo 120 caracteres).");
+
+        // Guard de rendimiento: demanda esperada = NMD * media
+        if (Number.isFinite(nmdRaw) && Number.isFinite(mediaRaw)) {
+            const expected = nmdRaw * mediaRaw;
+            if (expected > EXPECTED_TOTAL_MAX) {
+                ERR.push(
+                    `La demanda total esperada (NMD × media) es demasiado grande (${expected.toLocaleString()} kg). ` +
+                    `Reduce «Días a simular» o «Demanda media» (límite sugerido: ${EXPECTED_TOTAL_MAX.toLocaleString()} kg).`
+                );
+            } else if (expected > EXPECTED_TOTAL_MAX / 5) {
+                WARN.push(
+                    `Aviso: demanda esperada alta (${expected.toLocaleString()} kg); la simulación puede tardar más.`
+                );
+            }
+        }
+
+        // Advertencias de negocio (no bloquean)
+        if (Number.isFinite(puvRaw) && Number.isFinite(cadqRaw) && puvRaw < cadqRaw) {
+            WARN.push("Advertencia: el precio de venta (PUV) es menor que el costo de adquisición (CADQ).");
+        }
+        if (Number.isFinite(cinvRaw) && Number.isFinite(puvRaw) && cinvRaw > puvRaw) {
+            WARN.push("Advertencia: el costo de inventario por kg·día supera el precio de venta por kg.");
+        }
+
+        // Si hay errores, detener
+        if (ERR.length) {
+            ERR.forEach((msg) => emit({ type: "stderr", line: msg }));
+            emit({ type: "stderr", line: "Corrige los campos y vuelve a intentar." });
+            return;
+        }
+        // Mostrar advertencias (si las hay)
+        WARN.forEach((w) => emit({ type: "stderr", line: w }));
+
+        // ===== Normalización =====
+        const NMD = Math.floor(nmdRaw);
+        const CBO = +cboRaw;
+        const PUV = +puvRaw;
+        const CADQ = +cadqRaw;
+        const CINV = +cinvRaw;
+        const CORDET_UNIT = +cordRaw;
+        const media_demanda = +mediaRaw;
 
         const rng = seedStr ? makeLCG(strToSeed(seedStr)) : makeLCG((Math.random() * 1e9) >>> 0);
 

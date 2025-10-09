@@ -45,11 +45,81 @@ export const simP5: RunnerSpec = {
         { key: "seed", label: "Semilla RNG (opcional)", type: "string", defaultValue: "" },
     ],
     async run(params, emit) {
-        const dias = Number.isFinite(+params.dias) && +params.dias > 0 ? Math.floor(+params.dias) : 30;
-        const lambda = Number.isFinite(+params.lambda) && +params.lambda >= 0 ? +params.lambda : 1.0;
-        const precioHuevo = Number.isFinite(+params.precio_huevo) ? +params.precio_huevo : 1.5;
-        const precioPollo = Number.isFinite(+params.precio_pollo) ? +params.precio_pollo : 5.0;
+        // ===== VALIDACIÓN =====
+        const ERR: string[] = [];
+        const WARN: string[] = [];
+
+        const D_MAX = 5000;       // límite razonable de días
+        const LAMBDA_MAX = 1_000; // límite razonable para λ
+        const EGGS_EXPECTED_MAX = 2_000_000; // tope de huevos esperados (rendimiento)
+
+        // dias: entero > 0 y <= D_MAX
+        const dRaw = Number(params.dias);
+        if (!Number.isFinite(dRaw)) {
+            ERR.push("«Días a simular» debe ser un número válido (sin letras).");
+        } else if (!Number.isInteger(dRaw)) {
+            ERR.push("«Días a simular» debe ser un entero (sin decimales).");
+        } else if (dRaw <= 0) {
+            ERR.push("«Días a simular» debe ser mayor que 0.");
+        } else if (dRaw > D_MAX) {
+            ERR.push(`«Días a simular» no puede ser mayor que ${D_MAX}.`);
+        }
+
+        // lambda: número >= 0 y <= LAMBDA_MAX
+        const lRaw = Number(params.lambda);
+        if (!Number.isFinite(lRaw)) {
+            ERR.push("«λ (huevos/día)» debe ser un número válido.");
+        } else if (lRaw < 0) {
+            ERR.push("«λ (huevos/día)» no puede ser negativo.");
+        } else if (lRaw > LAMBDA_MAX) {
+            ERR.push(`«λ (huevos/día)» no puede ser mayor que ${LAMBDA_MAX}.`);
+        }
+
+        // precios: numéricos y >= 0
+        const phRaw = Number(params.precio_huevo);
+        const ppRaw = Number(params.precio_pollo);
+
+        if (!Number.isFinite(phRaw)) ERR.push("«Precio huevo» debe ser un número válido.");
+        else if (phRaw < 0) ERR.push("«Precio huevo» no puede ser negativo.");
+
+        if (!Number.isFinite(ppRaw)) ERR.push("«Precio pollo» debe ser un número válido.");
+        else if (ppRaw < 0) ERR.push("«Precio pollo» no puede ser negativo.");
+
+        // Semilla: opcional, pero si viene limitamos tamaño
         const seedStr = String(params.seed ?? "").trim();
+        if (seedStr.length > 120) {
+            ERR.push("La semilla es demasiado larga (máximo 120 caracteres).");
+        }
+
+        // Guard de rendimiento: huevos esperados = dias * lambda
+        if (Number.isFinite(dRaw) && Number.isFinite(lRaw)) {
+            const eggsExpected = dRaw * lRaw;
+            if (eggsExpected > EGGS_EXPECTED_MAX) {
+                ERR.push(
+                    `El producto «días × λ» es demasiado grande (${eggsExpected.toLocaleString()}). ` +
+                    `Reduce días o λ (límite sugerido: ${EGGS_EXPECTED_MAX.toLocaleString()} huevos esperados).`
+                );
+            } else if (eggsExpected > EGGS_EXPECTED_MAX / 10) {
+                WARN.push(
+                    `Aviso: el valor esperado de huevos (${eggsExpected.toLocaleString()}) es alto; ` +
+                    `la simulación puede tardar más.`
+                );
+            }
+        }
+
+        if (ERR.length) {
+            ERR.forEach((msg) => emit({ type: "stderr", line: msg }));
+            emit({ type: "stderr", line: "Corrige los campos y vuelve a intentar." });
+            return;
+        }
+        WARN.forEach((w) => emit({ type: "stderr", line: w }));
+
+        // Normalización
+        const dias = Math.floor(dRaw);
+        const lambda = +lRaw;
+        const precioHuevo = +phRaw;
+        const precioPollo = +ppRaw;
+
         const rng = seedStr ? makeLCG(strToSeed(seedStr)) : makeLCG((Math.random() * 1e9) >>> 0);
 
         // 1) Parámetros legibles

@@ -47,11 +47,62 @@ export const simP4: RunnerSpec = {
     { key: "seed",        label: "Semilla RNG (opcional)",    type: "string", defaultValue: "" },
   ],
   async run(params, emit) {
-    const H           = Number.isFinite(+params.H)          && +params.H > 0 ? Math.floor(+params.H) : 8;
-    const costo_fijo  = Number.isFinite(+params.costo_fijo) ? +params.costo_fijo : 300;
-    const costo       = Number.isFinite(+params.costo)      ? +params.costo : 50;
-    const precio      = Number.isFinite(+params.precio)     ? +params.precio : 75;
-    const seedStr     = String(params.seed ?? "").trim();
+    // ===== VALIDACIÓN =====
+    const ERR: string[] = [];
+    const WARN: string[] = [];
+    const H_MAX = 1000; // límite razonable
+
+    // H: entero > 0 y no gigante
+    const Hraw = Number(params.H);
+    if (!Number.isFinite(Hraw)) {
+      ERR.push("«Horas del día» debe ser un número válido (sin letras).");
+    } else if (!Number.isInteger(Hraw)) {
+      ERR.push("«Horas del día» debe ser un entero (sin decimales).");
+    } else if (Hraw <= 0) {
+      ERR.push("«Horas del día» debe ser mayor que 0.");
+    } else if (Hraw > H_MAX) {
+      ERR.push(`«Horas del día» no puede ser mayor que ${H_MAX}.`);
+    }
+
+    // Costo fijo, costo y precio: numéricos y >= 0
+    const cfRaw = Number(params.costo_fijo);
+    const cRaw  = Number(params.costo);
+    const pRaw  = Number(params.precio);
+
+    if (!Number.isFinite(cfRaw)) ERR.push("«Costo fijo diario» debe ser un número válido.");
+    else if (cfRaw < 0) ERR.push("«Costo fijo diario» no puede ser negativo.");
+
+    if (!Number.isFinite(cRaw)) ERR.push("«Costo por artículo» debe ser un número válido.");
+    else if (cRaw < 0) ERR.push("«Costo por artículo» no puede ser negativo.");
+
+    if (!Number.isFinite(pRaw)) ERR.push("«Precio de venta» debe ser un número válido.");
+    else if (pRaw < 0) ERR.push("«Precio de venta» no puede ser negativo.");
+
+    // Semilla: opcional, pero si viene, limitar tamaño
+    const seedStr = String(params.seed ?? "").trim();
+    if (seedStr.length > 120) {
+      ERR.push("La semilla es demasiado larga (máximo 120 caracteres).");
+    }
+
+    // Advertencia de negocio: precio < costo (no bloquea)
+    if (Number.isFinite(cRaw) && Number.isFinite(pRaw) && pRaw < cRaw) {
+      WARN.push("Advertencia: el precio de venta es menor que el costo unitario (ganancia negativa por artículo).");
+    }
+
+    if (ERR.length) {
+      ERR.forEach((msg) => emit({ type: "stderr", line: msg }));
+      emit({ type: "stderr", line: "Corrige los campos y vuelve a intentar." });
+      return;
+    }
+    // Mostrar advertencias si las hay
+    WARN.forEach((w) => emit({ type: "stderr", line: w }));
+
+    // ===== PARÁMETROS NORMALIZADOS =====
+    const H          = Math.floor(Hraw);
+    const costo_fijo = +cfRaw;
+    const costo      = +cRaw;
+    const precio     = +pRaw;
+
     const rng = seedStr ? makeLCG(strToSeed(seedStr)) : makeLCG((Math.random() * 1e9) >>> 0);
 
     // 1) Parámetros
