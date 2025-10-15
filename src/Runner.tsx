@@ -1,21 +1,12 @@
+// src/Runner.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { RunnerSpec, SimEvent } from "./events";
+import type { ParamRow, RunnerSpec, SimEvent, SummarySpec, TableColumn } from "./events";
 
-type TableColumn = { key: string; label: string; align?: "left" | "right" | "center" };
 type TableSpec = { title?: string; columns: TableColumn[]; rows: Record<string, any>[] };
-
-type ParamRow = { label: string; value: string | number };
-type SummarySpec = { title?: string; rows: ParamRow[] };
-type SpecExtras = {
-    details?: string[];
-    tablePreview?: { title?: string; columns: TableColumn[] };
-};
 
 type Props = { spec: RunnerSpec };
 
 export default function Runner({ spec }: Props) {
-    const ex = spec as RunnerSpec & SpecExtras;
-
     const formRef = useRef<HTMLFormElement>(null);
     const [running, setRunning] = useState(false);
 
@@ -67,12 +58,14 @@ export default function Runner({ spec }: Props) {
     function resetViews() {
         setWarnings([]);
         setSummary(null);
-        setTable(ex.tablePreview ? { title: ex.tablePreview.title, columns: ex.tablePreview.columns, rows: [] } : null);
+        setTable(
+            spec.tablePreview ? { title: spec.tablePreview.title, columns: spec.tablePreview.columns, rows: [] } : null
+        );
     }
 
     useEffect(() => {
         setParamsView(paramsRowsFrom(defaults));
-        setTable(ex.tablePreview ? { title: ex.tablePreview.title, columns: ex.tablePreview.columns, rows: [] } : null);
+        setTable(spec.tablePreview ? { title: spec.tablePreview.title, columns: spec.tablePreview.columns, rows: [] } : null);
         setWarnings([]);
         setSummary(null);
     }, [spec]);
@@ -83,23 +76,22 @@ export default function Runner({ spec }: Props) {
             setWarnings((W) => [...W, e.line]);
             return;
         }
-        if (e.type === "info" && (e as any).panel === "params") {
-            const data = (e as any).data as ParamRow[] | undefined;
-            if (data?.length) setParamsView(data);
+        if (e.type === "info" && e.panel === "params" && e.data?.length) {
+            setParamsView(e.data);
             return;
         }
         if (e.type === "step" && e.name === "table:init") {
-            const spec = e.data as { title?: string; columns: TableColumn[] };
+            const spec = e.data;
             setTable({ title: spec.title, columns: spec.columns, rows: [] });
             return;
         }
         if (e.type === "step" && e.name === "table:row") {
-            const row = e.data as Record<string, any>;
+            const row = e.data;
             setTable((T) => (T ? { ...T, rows: [...T.rows, row] } : T));
             return;
         }
         if (e.type === "done") {
-            const s = (e as any).summaryFriendly as SummarySpec | undefined;
+            const s = e.summaryFriendly;
             if (s?.rows?.length) setSummary(s);
             else if (e.summary) {
                 const rows: ParamRow[] = Object.entries(e.summary).map(([k, v]) => ({
@@ -114,11 +106,13 @@ export default function Runner({ spec }: Props) {
 
     function toFriendly(k: string) {
         const map: Record<string, string> = {
+            // P3
             totalJuegos: "Total de juegos",
             ganadosCasa: "Juegos ganados por la casa",
             perdidosCasa: "Juegos perdidos por la casa",
             porcentajeGanadosCasa: "Porcentaje de juegos ganados",
             gananciaNetaTotalBs: "Ganancia neta total (Bs)",
+            // P4
             horas: "Horas simuladas",
             clientesAtendidos: "Clientes atendidos",
             articulosVendidos: "Artículos vendidos",
@@ -126,8 +120,44 @@ export default function Runner({ spec }: Props) {
             costoVariableBs: "Costo variable (Bs)",
             costoFijoBs: "Costo fijo (Bs)",
             gananciaNetaBs: "Ganancia neta (Bs)",
+            // P5
+            totalHuevos: "Huevos producidos (total)",
+            huevosPermanecen: "Huevos que permanecen",
+            huevosRotos: "Huevos rotos",
+            pollosVivos: "Pollos vivos",
+            pollosMuertos: "Pollos muertos",
+            ingresoPromedioDiaBs: "Ingreso promedio por día (Bs)",
+            ingresoNetoBs: "Ingreso neto (Bs)",
+            // P6
+            demandaTotalKg: "Demanda total (kg)",
+            demandaInsatisfechaKg: "Demanda no atendida (kg)",
+            porcentajePerdida: "Porcentaje no atendido",
+            ingresoBrutoBs: "Ingreso bruto (Bs)",
+            costoAdquisicionBs: "Costo de adquisición (Bs)",
+            costoInventarioBs: "Costo de inventario (Bs)",
+            costoOrdenesBs: "Costo por órdenes (Bs)",
+            costoTotalBs: "Costo total (Bs)",
+            gananciaNetaBsP6: "Ganancia neta (Bs)",
+            inventarioFinalKg: "Inventario final (kg)",
+            // P1/P2
+            capitalFinal: "Capital final ($)",
         };
         return map[k] ?? k;
+    }
+
+    // Reglas de constraints HTML por key (no sustituyen la validación del sim, sólo ayudan en UI)
+    function inputConstraints(fieldKey: string, type: "int" | "float" | "string") {
+        if (type === "string") return { inputMode: "text" as const };
+        // claves típicas de conteo/tiempo
+        if (/(^N$|^H$|^dias$|^NMD$|^T$)/i.test(fieldKey)) return { min: 1, step: 1, inputMode: "numeric" as const };
+        // dinero / costos / precios
+        if (/(costo|precio|CADQ|PUV|CINV|CORDET|k0)/i.test(fieldKey)) return { min: 0, step: "any", inputMode: "decimal" as const };
+        // tasas 0..1
+        if (/^i$/.test(fieldKey)) return { min: 0, max: 1, step: "any", inputMode: "decimal" as const };
+        // capacidades/demanda
+        if (/(CBO|media_demanda)/.test(fieldKey)) return { min: 0, step: "any", inputMode: "decimal" as const };
+        // genérico
+        return { min: 0, step: "any", inputMode: "decimal" as const };
     }
 
     async function onRun(ev: React.FormEvent) {
@@ -164,18 +194,25 @@ export default function Runner({ spec }: Props) {
             <p className="muted" style={{ marginTop: -6 }}>{spec.description}</p>
 
             {/* FORM */}
-            <form ref={formRef} onSubmit={onRun} className="form" onInput={refreshParamsFromForm}>
-                {spec.inputs.map((f) => (
-                    <label key={f.key} className="row">
-                        <span>{f.label}</span>
-                        <input
-                            name={f.key}
-                            defaultValue={defaults[f.key] ?? ""}
-                            type={f.type === "string" ? "text" : "number"}
-                            step={f.type === "int" ? 1 : "any"}
-                        />
-                    </label>
-                ))}
+            <form ref={formRef} onSubmit={onRun} className="form" onInput={refreshParamsFromForm} noValidate>
+                {spec.inputs.map((f) => {
+                    const extra = inputConstraints(f.key, f.type);
+                    return (
+                        <label key={f.key} className="row">
+                            <span>{f.label}</span>
+                            <input
+                                name={f.key}
+                                defaultValue={defaults[f.key] ?? ""}
+                                type={f.type === "string" ? "text" : "number"}
+                                step={f.type === "int" ? 1 : extra.step ?? "any"}
+                                min={extra.min}
+                                max={extra.max}
+                                inputMode={extra.inputMode}
+                                required
+                            />
+                        </label>
+                    );
+                })}
                 <div style={{ gridColumn: "1 / -1" }}>
                     <button className="btn" disabled={running}>
                         {running ? "Ejecutando..." : "Ejecutar"}
@@ -184,18 +221,18 @@ export default function Runner({ spec }: Props) {
             </form>
 
             {/* Detalles (si hay) */}
-            {ex.details?.length ? (
+            {spec.details?.length ? (
                 <div className="section" aria-label="Detalles">
                     <h3 style={{ marginTop: 0 }}>Detalles</h3>
                     <ul style={{ margin: 0, paddingLeft: 18 }}>
-                        {ex.details.map((d, i) => (
+                        {spec.details.map((d, i) => (
                             <li key={i} style={{ lineHeight: 1.5 }}>{d}</li>
                         ))}
                     </ul>
                 </div>
             ) : null}
 
-            {/* Parámetros (siempre, en vivo) */}
+            {/* Parámetros (en vivo) */}
             {paramsView.length > 0 && (
                 <div className="section" aria-label="Parámetros">
                     <h3 style={{ marginTop: 0 }}>Parámetros</h3>
